@@ -2,10 +2,9 @@
 
 import collections
 import os
-import random
 import struct
 
-from scapy.fields import ByteEnumField, ByteField, ConditionalField, FieldLenField, FlagsField, LenField, \
+from scapy.fields import ByteEnumField, ByteField, ConditionalField, FieldLenField, FlagsField, IntEnumField, LenField, \
     PacketListField, StrField, StrFixedLenField, StrLenField
 from scapy.layers.inet import TCP
 from scapy.packet import bind_layers, Packet
@@ -66,6 +65,23 @@ HTTP2_FLAGS = collections.OrderedDict(((0x01, "END_STREAM"),
 
 HTTP2Flags = Dict2Enum(HTTP2_FLAGS)
 
+HTTP2_ERROR_CODES = {0x00: "NO_ERROR",
+                     0x01: "PROTOCOL_ERROR",
+                     0x02: "INTERNAL_ERROR",
+                     0x03: "FLOW_CONTROL_ERROR",
+                     0x04: "SETTINGS_TIMEOUT",
+                     0x05: "STREAM_CLOSED",
+                     0x06: "FRAME_SIZE_ERROR",
+                     0x07: "REFUSED_STREAM",
+                     0x08: "CANCEL",
+                     0x09: "COMPRESSION_ERROR",
+                     0x0a: "CONNECT_ERROR",
+                     0x0b: "ENHANCE_YOUR_CALM",
+                     0x0c: "INADEQUATE_SECURITY",
+                     0x0d: "HTTP_1_1_REQUIRED"}
+
+HTTP2ErrorCodes = Dict2Enum(HTTP2_ERROR_CODES)
+
 def has_flag_set(pkt, flag):
     flag_index = HTTP2_FLAGS.keys().index(flag)
     return True if pkt.haslayer(HTTP2Frame) and (pkt[HTTP2Frame].flags & flag) >> flag_index == 1 else False
@@ -104,17 +120,27 @@ class HTTP2Data(HTTP2PaddedFrame):
                    ConditionalField(StrLenField("padding", "", length_from=lambda pkt: pkt.padding_length),
                                     underlayer_has_padding_flag_set)]
 
+
 class HTTP2Headers(HTTP2PaddedFrame):
     name = "%s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.HEADERS]
     fields_desc = [ConditionalField(FieldLenField("padding_length", None, length_of="padding", fmt="B"),
                                     underlayer_has_padding_flag_set),
-                   ConditionalField(StrFixedLenField("dependency", "", 32), underlayer_has_priority_flag_set),
+                   ConditionalField(StrFixedLenField("dependency", "\x00" * 32, 32), underlayer_has_priority_flag_set),
                    ConditionalField(ByteField("weight", 0), underlayer_has_priority_flag_set),
                    # Encoding for => Host: 127.0.0.1
                    StrField("headers", "f\x87\x08\x9d\\\x0b\x81p\xff"),
                    ConditionalField(StrLenField("padding", "", length_from=lambda pkt: pkt.padding_length),
                                     underlayer_has_padding_flag_set)]
 
+
+class HTTP2Priority(Packet):
+    name = "%s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.PRIORITY]
+    fields_desc = [StrFixedLenField("dependency", "\x00" * 32, 32),
+                   ByteField("weight", 0)]
+
+class HTTP2RstStream(Packet):
+    name = "%s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.RST_STREAM]
+    fields_desc = [IntEnumField("error_code", HTTP2ErrorCodes.NO_ERROR, HTTP2_ERROR_CODES)]
 
 class HTTP2(Packet):
     name = "HTTP2"
@@ -146,16 +172,34 @@ class HTTP2(Packet):
         return raw_bytes[pos:]
 
 
-def generate_stream_id():
-    return "%s%s" % (random.randint(0x0, 0xff) ^ (1 << 7), os.urandom(31))
-
 def pack_headers(encoder, headers):
     return encoder.encode(headers)
 
 def unpack_headers(decoder, str_):
     return decoder.decode(str_)
 
+def set_msb(str_):
+    first_byte = ord(str_[0])
+    return "%s%s" % (chr(first_byte | 0x80), str_[1:])
+
+def unset_msb(str_):
+    first_byte = ord(str_[0])
+    return "%s%s" % (chr(first_byte & ~0x80), str_[1:])
+
+def toggle_msb(str_):
+    first_byte = ord(str_[0])
+    return "%s%s" % (chr(first_byte ^ 0x80), str_[1:])
+
+def generate_stream_id():
+    return unset_msb(os.urandom(32))
+
+set_dependency_e_flag = set_msb
+unset_dependency_e_flag = unset_msb
+toggle_dependency_e_flag = toggle_msb
+
 bind_layers(TCP, HTTP2Frame, dport=443)
 bind_layers(TCP, HTTP2Frame, sport=443)
 bind_layers(HTTP2Frame, HTTP2Data, type=HTTP2FrameTypes.DATA)
 bind_layers(HTTP2Frame, HTTP2Headers, type=HTTP2FrameTypes.HEADERS)
+bind_layers(HTTP2Frame, HTTP2Priority, type=HTTP2FrameTypes.PRIORITY)
+bind_layers(HTTP2Frame, HTTP2RstStream, type=HTTP2FrameTypes.RST_STREAM)

@@ -82,20 +82,23 @@ class TestHTTP2Headers(unittest.TestCase):
 class TestHTTP2(unittest.TestCase):
 
     def test_stacked_frame_packet_are_dissected_correctly(self):
-        frame1 = HTTP2Frame()/HTTP2Headers()
-        frame2 = HTTP2Frame()/HTTP2Data()
-        built_pkt = HTTP2.from_frames([frame1, frame2])
+        frame1 = HTTP2Frame(stream_id="B" * 32, flags=HTTP2Flags.UNUSED_7)/HTTP2Headers()
+        frame2 = HTTP2Frame(flags=HTTP2Flags.PADDED | HTTP2Flags.PRIORITY, type=0xff)/HTTP2Data(padding="P" * 23)
+        frame3 = HTTP2Frame()/HTTP2Priority(dependency="D" * 32, weight=5)
+        built_pkt = HTTP2.from_frames([frame1, frame2, frame3])
         pkt = HTTP2(str(built_pkt))
-        self.assertTrue(len(pkt.frames) == 2)
+        pkt.show()
+        self.assertTrue(len(pkt.frames) == 3)
         self.assertEqual(str(frame1), str(pkt.frames[0]))
         self.assertEqual(str(frame2), str(pkt.frames[1]))
+        self.assertEqual(str(frame3), str(pkt.frames[2]))
 
 
 class TestTopLevelFunctions(unittest.TestCase):
 
     def test_stream_id_first_bit_is_clear(self):
-        pkt = HTTP2Frame()
-        self.assertTrue(ord(pkt.stream_id[0]) & (1 << 7) == 0)
+        for i in range(0, 0xff):
+            self.assertTrue(ord(generate_stream_id()[0]) & (1 << 7) == 0)
 
     def test_when_flags_are_set_they_are_caught(self):
         pkt = HTTP2Frame(flags=HTTP2Flags.PRIORITY)
@@ -108,3 +111,7 @@ class TestTopLevelFunctions(unittest.TestCase):
         self.assertFalse(has_flag_set(pkt, HTTP2Flags.UNUSED_2))
         self.assertFalse(has_flag_set(pkt, HTTP2Flags.PRIORITY))
         self.assertFalse(has_flag_set(pkt, HTTP2Flags.UNUSED_7))
+
+    def test_when_e_flag_is_set_first_bit_is_set(self):
+        stream_dependency_id = set_dependency_e_flag("%s%s" % (chr(0x7f), "S" * 31))
+        self.assertEqual(0x7f | 0x80, ord(stream_dependency_id[0]))
