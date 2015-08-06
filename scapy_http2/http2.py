@@ -5,8 +5,8 @@ import os
 import random
 import struct
 
-from scapy.fields import ByteEnumField, ConditionalField, FieldLenField, FlagsField, LenField, PacketListField, \
-    StrField, StrFixedLenField, StrLenField
+from scapy.fields import ByteEnumField, ByteField, ConditionalField, FieldLenField, FlagsField, LenField, \
+    PacketListField, StrField, StrFixedLenField, StrLenField
 from scapy.layers.inet import TCP
 from scapy.packet import bind_layers, Packet
 
@@ -67,9 +67,8 @@ HTTP2_FLAGS = collections.OrderedDict(((0x01, "END_STREAM"),
 HTTP2Flags = Dict2Enum(HTTP2_FLAGS)
 
 def has_flag_set(pkt, flag):
-    return True if pkt.haslayer(HTTP2Frame) and pkt[HTTP2Frame].flags == flag else False
-
-has_padding_flag_set = lambda pkt: has_flag_set(pkt, HTTP2Flags.PADDED)
+    flag_index = HTTP2_FLAGS.keys().index(flag)
+    return True if pkt.haslayer(HTTP2Frame) and (pkt[HTTP2Frame].flags & flag) >> flag_index == 1 else False
 
 class HTTP2Frame(Packet):
     name = "HTTP2 Frame"
@@ -82,25 +81,26 @@ class HTTP2Frame(Packet):
 class HTTP2PaddedFrame(Packet):
 
     def pre_dissect(self, s):
-        if self.underlayer is not None and has_padding_flag_set(self.underlayer):
+        if self.underlayer is not None and has_flag_set(self.underlayer, HTTP2Flags.PADDED):
             padding_length = ord(s[0])
             self.padding = s[-padding_length:]
             s = s[:-padding_length]
         return s
 
 
-def underlayer_has_padding_flag_set(pkt, flag):
-    return True if pkt.underlayer is not None and pkt.underlayer.flags == HTTP2Flags.PADDED else False
+def underlayer_has_flag_set(pkt, flag):
+    flag_index = HTTP2_FLAGS.keys().index(flag)
+    return True if pkt.underlayer is not None and (pkt.underlayer.flags & flag) >> flag_index == 1 else False
 
-underlayer_has_padding_flag_set = lambda pkt: underlayer_has_padding_flag_set(pkt, HTTP2Flags.PADDED)
-underlayer_has_priority_flag_set = lambda pkt: underlayer_has_padding_flag_set(pkt, HTTP2Flags.PRIORITY)
+underlayer_has_padding_flag_set = lambda pkt: underlayer_has_flag_set(pkt, HTTP2Flags.PADDED)
+underlayer_has_priority_flag_set = lambda pkt: underlayer_has_flag_set(pkt, HTTP2Flags.PRIORITY)
 
 
 class HTTP2Data(HTTP2PaddedFrame):
     name = "%s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.DATA]
     fields_desc = [ConditionalField(FieldLenField("padding_length", None, length_of="padding", fmt="B"),
                                     underlayer_has_padding_flag_set),
-                   StrField("data", ":method = GET\r\n:scheme = https\r\n:path = /\r\n\r\n"),
+                   StrField("data", ":method = GET\r\n:scheme = https\r\n:path = /\r\n"),
                    ConditionalField(StrLenField("padding", "", length_from=lambda pkt: pkt.padding_length),
                                     underlayer_has_padding_flag_set)]
 
@@ -108,7 +108,10 @@ class HTTP2Headers(HTTP2PaddedFrame):
     name = "%s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.HEADERS]
     fields_desc = [ConditionalField(FieldLenField("padding_length", None, length_of="padding", fmt="B"),
                                     underlayer_has_padding_flag_set),
-                   StrField("data", ":method = GET\r\n:scheme = https\r\n:path = /\r\n\r\n"),
+                   ConditionalField(StrFixedLenField("dependency", "", 32), underlayer_has_priority_flag_set),
+                   ConditionalField(ByteField("weight", 0), underlayer_has_priority_flag_set),
+                   # Encoding for => Host: 127.0.0.1
+                   StrField("headers", "f\x87\x08\x9d\\\x0b\x81p\xff"),
                    ConditionalField(StrLenField("padding", "", length_from=lambda pkt: pkt.padding_length),
                                     underlayer_has_padding_flag_set)]
 
@@ -146,6 +149,11 @@ class HTTP2(Packet):
 def generate_stream_id():
     return "%s%s" % (random.randint(0x0, 0xff) ^ (1 << 7), os.urandom(31))
 
+def pack_headers(encoder, headers):
+    return encoder.encode(headers)
+
+def unpack_headers(decoder, str_):
+    return decoder.decode(str_)
 
 bind_layers(TCP, HTTP2Frame, dport=443)
 bind_layers(TCP, HTTP2Frame, sport=443)
