@@ -97,6 +97,12 @@ def has_flag_set(pkt, flag):
     return True if pkt.haslayer(HTTP2Frame) and (pkt[HTTP2Frame].flags & flag) >> flag_index == 1 else False
 
 
+class HTTP2Preface(Packet):
+    name = "HTTP2 Preface"
+    PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+    fields_desc = [StrFixedLenField("preface", PREFACE, len(PREFACE))]
+
+
 class HTTP2Frame(Packet):
     name = "HTTP2 Frame Header"
     fields_desc = [ByteLenField("length", None, width=3),
@@ -222,11 +228,18 @@ class HTTP2(Packet):
         frame_header_len = len(frame())
 
         frames = []
-        while pos < len(raw_bytes) - frame_header_len:
+        while pos <= len(raw_bytes) - frame_header_len:
+            preface = None
+            if raw_bytes[pos: pos + len(HTTP2Preface.PREFACE)] == HTTP2Preface.PREFACE:
+                preface = HTTP2Preface(raw_bytes[pos: pos + len(HTTP2Preface.PREFACE)])
+                pos += len(HTTP2Preface.PREFACE)
             payload_len = frame(raw_bytes[pos: pos + frame_header_len]).length
             payload = frame(raw_bytes[pos: pos + frame_header_len + payload_len])
             # Populate our list of found frames
-            frames.append(payload)
+            if preface is not None:
+                frames.append(preface / payload)
+            else:
+                frames.append(payload)
             pos += (frame_header_len + payload.length)
         self.fields["frames"] = frames
         return raw_bytes[pos:]

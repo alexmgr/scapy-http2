@@ -3,7 +3,26 @@
 import unittest
 
 from scapy.packet import Raw
-from http2 import *
+from scapy_http2.http2 import *
+
+
+class TestHTTP2Preface(unittest.TestCase):
+    def test_http2_preface_is_constant(self):
+        self.assertEqual(HTTP2Preface.PREFACE, str(HTTP2Preface()))
+
+    def test_when_http2_preface_is_present_it_is_dissected(self):
+        built_pkt = HTTP2Preface()/HTTP2Frame()/HTTP2Settings()
+        pkt = HTTP2(str(built_pkt))
+        self.assertTrue(pkt.haslayer(HTTP2Preface))
+        self.assertTrue(pkt.haslayer(HTTP2Frame))
+        self.assertEqual(HTTP2FrameTypes.SETTINGS, pkt[HTTP2Frame].type)
+
+    def test_when_http2_preface_is_absent_it_is_not_dissected(self):
+        built_pkt = HTTP2Frame()/HTTP2Settings()
+        pkt = HTTP2(str(built_pkt))
+        self.assertFalse(pkt.haslayer(HTTP2Preface))
+        self.assertTrue(pkt.haslayer(HTTP2Frame))
+        self.assertEqual(HTTP2FrameTypes.SETTINGS, pkt[HTTP2Frame].type)
 
 
 class TestHTTP2FrameHeader(unittest.TestCase):
