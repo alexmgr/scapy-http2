@@ -58,13 +58,13 @@ class TestHTTP2PaddedFrame(unittest.TestCase):
 
 class TestHTTP2Headers(unittest.TestCase):
     def test_when_priority_flag_is_set_stream_dependency_and_weight_are_enabled(self):
-        dependency_stream = 0x9876
+        stream_dependency = 0x9876
         weight = 0xff
-        built_pkt = HTTP2Frame(flags=HTTP2Flags.PRIORITY) / HTTP2Headers(dependency_stream=dependency_stream,
+        built_pkt = HTTP2Frame(flags=HTTP2Flags.PRIORITY) / HTTP2Headers(stream_dependency=stream_dependency,
                                                                          weight=weight)
         pkt = HTTP2Frame(str(built_pkt))
         self.assertTrue(pkt.haslayer(HTTP2Headers))
-        self.assertEqual(dependency_stream, pkt[HTTP2Headers].dependency_stream)
+        self.assertEqual(stream_dependency, pkt[HTTP2Headers].stream_dependency)
         self.assertEqual(weight, pkt[HTTP2Headers].weight)
 
     def test_when_priority_flag_is_unset_stream_dependency_and_weight_are_disabled(self):
@@ -72,7 +72,7 @@ class TestHTTP2Headers(unittest.TestCase):
         built_pkt = HTTP2Frame(flags=HTTP2Flags.UNUSED_2) / HTTP2Headers(headers=headers)
         pkt = HTTP2Frame(str(built_pkt))
         self.assertTrue(pkt.haslayer(HTTP2Headers))
-        self.assertIsNone(pkt[HTTP2Headers].dependency_stream)
+        self.assertIsNone(pkt[HTTP2Headers].stream_dependency)
         self.assertIsNone(pkt[HTTP2Headers].weight)
 
     def test_when_both_priority_and_padded_flag_are_set_all_options_are_enabled(self):
@@ -80,10 +80,10 @@ class TestHTTP2Headers(unittest.TestCase):
         weight = 0xff
         padding = "P" * 23
         built_pkt = HTTP2Frame(flags=HTTP2Flags.PADDED | HTTP2Flags.PRIORITY) / HTTP2Headers(
-            dependency_stream=stream_dependency, weight=weight) / Padding(load=padding)
+            stream_dependency=stream_dependency, weight=weight) / Padding(load=padding)
         pkt = HTTP2Frame(str(built_pkt))
         self.assertTrue(pkt.haslayer(HTTP2Headers))
-        self.assertEqual(stream_dependency, pkt[HTTP2Headers].dependency_stream)
+        self.assertEqual(stream_dependency, pkt[HTTP2Headers].stream_dependency)
         self.assertEqual(weight, pkt[HTTP2Headers].weight)
         self.assertEqual(padding, pkt[Padding].load)
 
@@ -93,7 +93,7 @@ class TestHTTP2Headers(unittest.TestCase):
         pkt = HTTP2Frame(str(built_pkt))
         self.assertTrue(pkt.haslayer(HTTP2Headers))
         self.assertIsNone(pkt[HTTP2Headers].padding_length)
-        self.assertIsNone(pkt[HTTP2Headers].dependency_stream)
+        self.assertIsNone(pkt[HTTP2Headers].stream_dependency)
         self.assertIsNone(pkt[HTTP2Headers].weight)
         self.assertFalse(pkt.haslayer(Padding))
 
@@ -117,9 +117,9 @@ class TestHTTP2Settings(unittest.TestCase):
 
 class TestHTTP2(unittest.TestCase):
     def test_stacked_frame_packet_are_dissected_correctly(self):
-        frame1 = HTTP2Frame(stream=0x4, flags=HTTP2Flags.UNUSED_7) / HTTP2Headers()
+        frame1 = HTTP2Frame(stream=0x5, flags=HTTP2Flags.UNUSED_7) / HTTP2Headers()
         frame2 = HTTP2Frame(flags=HTTP2Flags.PADDED | HTTP2Flags.PRIORITY) / HTTP2Data() / Padding(load="P" * 23)
-        frame3 = HTTP2Frame() / HTTP2Priority(dependency_stream=0x5, weight=5)
+        frame3 = HTTP2Frame() / HTTP2Priority(stream_dependency=0x5, weight=5)
         frame4 = HTTP2Frame() / HTTP2RstStream(error_code=HTTP2ErrorCodes.REFUSED_STREAM)
         frame5 = HTTP2Frame(flags=HTTP2Flags.PADDED) / HTTP2PushPromise(promised_stream=0xffe34) / Padding(load="Z" * 9)
         frame6 = HTTP2Frame(flags=HTTP2Flags.UNUSED_2 | HTTP2Flags.ACK) / HTTP2Ping()
@@ -129,6 +129,7 @@ class TestHTTP2(unittest.TestCase):
         frame9 = HTTP2Frame(flags=HTTP2Flags.PADDED) / HTTP2Continuation(headers="some-headers")
         built_pkt = HTTP2.from_frames([frame1, frame2, frame3, frame4, frame5, frame6, frame7, frame8, frame9])
         pkt = HTTP2(str(built_pkt))
+        pkt.show()
         self.assertTrue(len(pkt.frames) == 9)
         self.assertEqual(str(frame1), str(pkt.frames[0]))
         self.assertEqual(str(frame2), str(pkt.frames[1]))
@@ -144,10 +145,6 @@ class TestHTTP2(unittest.TestCase):
 
 
 class TestTopLevelFunctions(unittest.TestCase):
-    def test_when_generated_stream_id_first_bit_is_clear(self):
-        for i in range(0, 0xff):
-            self.assertTrue(generate_stream_id() & (1 << 31) == 0)
-
     def test_when_flags_are_set_they_are_caught(self):
         pkt = HTTP2Frame(flags=HTTP2Flags.PRIORITY)
         self.assertTrue(has_flag_set(pkt, HTTP2Flags.PRIORITY))
@@ -160,6 +157,3 @@ class TestTopLevelFunctions(unittest.TestCase):
         self.assertFalse(has_flag_set(pkt, HTTP2Flags.PRIORITY))
         self.assertFalse(has_flag_set(pkt, HTTP2Flags.UNUSED_7))
 
-    def test_when_e_flag_is_set_first_bit_is_set(self):
-        stream_dependency_id = set_dependency_e_flag(0x7fffffff)
-        self.assertTrue(stream_dependency_id & (1 << 31) >> 31 == 1)

@@ -2,10 +2,11 @@
 
 import collections
 import random
+import socket
 import struct
 
-from scapy.fields import ByteEnumField, ByteField, ConditionalField, FieldLenField, FlagsField, IntEnumField, IntField, \
-    LenField, PacketListField, ShortEnumField, StrField, StrFixedLenField, StrLenField
+from scapy.fields import BitField, ByteEnumField, ByteField, ConditionalField, FieldLenField, FlagsField, IntEnumField,\
+    IntField, LenField, PacketListField, ShortEnumField, StrField, StrFixedLenField, StrLenField
 from scapy.layers.inet import TCP
 from scapy.packet import bind_layers, Packet, Padding
 
@@ -108,7 +109,8 @@ class HTTP2Frame(Packet):
     fields_desc = [ByteLenField("length", None, width=3),
                    ByteEnumField("type", HTTP2FrameTypes.DATA, HTTP2_FRAME_TYPES),
                    FlagsField("flags", 0, 8, HTTP2_FLAGS.values()),
-                   IntField("stream", 0)]
+                   BitField("R", 0, 1),
+                   BitField("stream", 0, 31)]
 
 
 class HTTP2PaddedFrame(Packet):
@@ -138,15 +140,17 @@ class HTTP2Data(HTTP2PaddedFrame):
 class HTTP2Headers(HTTP2PaddedFrame):
     name = "HTTP2 %s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.HEADERS]
     fields_desc = [ConditionalField(LenField("padding_length", None, fmt="B"), underlayer_has_padding_flag_set),
-                   ConditionalField(IntField("dependency_stream", 0), underlayer_has_priority_flag_set),
+                   ConditionalField(BitField("E", 0, 1), underlayer_has_priority_flag_set),
+                   ConditionalField(BitField("stream_dependency", 0, 31), underlayer_has_priority_flag_set),
                    ConditionalField(ByteField("weight", 0), underlayer_has_priority_flag_set),
-                   # Encoding for => Host: 127.0.0.1
-                   StrField("headers", "f\x87\x08\x9d\\\x0b\x81p\xff") ]
+                   # Encoding for => :method: GET, :scheme: https, :path: /, host: localhost
+                   StrField("headers", "\x87\x84f\x86\xa0\xe4\x1d\x13\x9d\t\x82")]
 
 
 class HTTP2Priority(Packet):
     name = "HTTP2 %s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.PRIORITY]
-    fields_desc = [IntField("dependency_stream", 0),
+    fields_desc = [BitField("E", 0, 1),
+                   BitField("stream_dependency", 0, 31),
                    ByteField("weight", 0)]
 
 
@@ -186,8 +190,9 @@ class HTTP2Settings(Packet):
 class HTTP2PushPromise(HTTP2PaddedFrame):
     name = "HTTP2 %s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.PUSH_PROMISE]
     fields_desc = [ConditionalField(LenField("padding_length", None, fmt="B"), underlayer_has_padding_flag_set),
-                   IntField("promised_stream", 0),
-                   StrField("headers", "f\x87\x08\x9d\\\x0b\x81p\xff")]
+                   BitField("R", 0, 1),
+                   BitField("promised_stream", 0, 31),
+                   StrField("headers", "\x87\x84f\x86\xa0\xe4\x1d\x13\x9d\t\x82")]
 
 
 class HTTP2Ping(Packet):
@@ -209,7 +214,7 @@ class HTTP2WindowUpdate(Packet):
 
 class HTTP2Continuation(Packet):
     name = "HTTP2 %s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.CONTINUATION]
-    fields_desc = [StrField("headers", "f\x87\x08\x9d\\\x0b\x81p\xff")]
+    fields_desc = [StrField("headers", "\x87\x84f\x86\xa0\xe4\x1d\x13\x9d\t\x82")]
 
 
 class HTTP2(Packet):
@@ -250,21 +255,9 @@ def pack_headers(encoder, headers):
 def unpack_headers(decoder, str_):
     return decoder.decode(str_)
 
-def set_msb(stream_id):
-    return stream_id | 0x80000000
-
-def unset_msb(stream_id):
-    return stream_id & ~0x80000000
-
-def toggle_msb(stream_id):
-    return stream_id ^ 0x80000000
-
 def generate_stream_id():
-    return unset_msb(random.randint(0, 2**32 -1))
+    return random.randint(0, 2**31 - 1)
 
-set_dependency_e_flag = set_msb
-unset_dependency_e_flag = unset_msb
-toggle_dependency_e_flag = toggle_msb
 
 bind_layers(TCP, HTTP2Frame, dport=443)
 bind_layers(TCP, HTTP2Frame, sport=443)
