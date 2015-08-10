@@ -258,6 +258,21 @@ def unpack_headers(decoder, str_):
 def generate_stream_id():
     return random.randint(0, 2**31 - 1)
 
+def get_stream_ids(start_id=3, end_id=2**31 - 1):
+    for id_ in xrange(start_id, end_id, 2):
+        yield id_
+
+def get_client_stream_ids(start_id=3, end_id=2**31 - 1):
+    if start_id % 2 == 0:
+        raise ValueError("Client stream ids must be odd")
+    else:
+        return get_stream_ids(start_id, end_id)
+
+def get_server_stream_ids(start_id=2, end_id=2**31 - 1):
+    if start_id % 2 != 0:
+        raise ValueError("Server stream ids must be even")
+    else:
+        return get_stream_ids(start_id, end_id)
 
 bind_layers(TCP, HTTP2Frame, dport=443)
 bind_layers(TCP, HTTP2Frame, sport=443)

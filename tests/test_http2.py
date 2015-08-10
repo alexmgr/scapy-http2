@@ -129,7 +129,6 @@ class TestHTTP2(unittest.TestCase):
         frame9 = HTTP2Frame(flags=HTTP2Flags.PADDED) / HTTP2Continuation(headers="some-headers")
         built_pkt = HTTP2.from_frames([frame1, frame2, frame3, frame4, frame5, frame6, frame7, frame8, frame9])
         pkt = HTTP2(str(built_pkt))
-        pkt.show()
         self.assertTrue(len(pkt.frames) == 9)
         self.assertEqual(str(frame1), str(pkt.frames[0]))
         self.assertEqual(str(frame2), str(pkt.frames[1]))
@@ -157,3 +156,15 @@ class TestTopLevelFunctions(unittest.TestCase):
         self.assertFalse(has_flag_set(pkt, HTTP2Flags.PRIORITY))
         self.assertFalse(has_flag_set(pkt, HTTP2Flags.UNUSED_7))
 
+    def test_stream_ids_are_generated_in_steps_of_2(self):
+        self.assertListEqual([4, 6, 8], list(get_stream_ids(4, 9)))
+
+    def test_generated_client_side_ids_are_odd(self):
+        with self.assertRaises(ValueError):
+            list(get_client_stream_ids(4, 9))
+        self.assertListEqual([5, 7], list(get_client_stream_ids(5, 9)))
+
+    def test_generated_server_side_ids_are_even(self):
+        with self.assertRaises(ValueError):
+            list(get_server_stream_ids(5, 9))
+        self.assertListEqual([4, 6, 8], list(get_server_stream_ids(4, 9)))
