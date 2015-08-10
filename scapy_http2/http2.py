@@ -99,8 +99,8 @@ def has_flag_set(pkt, flag):
 
 class HTTP2Preface(Packet):
     name = "HTTP2 Preface"
-    PREFACE = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
-    fields_desc = [StrFixedLenField("preface", PREFACE, len(PREFACE))]
+    MAGIC = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+    fields_desc = [StrFixedLenField("preface", MAGIC, len(MAGIC))]
 
 
 class HTTP2Frame(Packet):
@@ -117,7 +117,6 @@ class HTTP2PaddedFrame(Packet):
         if self.underlayer is not None and has_flag_set(self.underlayer, HTTP2Flags.PADDED):
             padding_length = ord(s[0])
             self.add_payload(Padding(load=s[-padding_length:]))
-            # self.fields["padding"] = s[-padding_length:]
             s = s[:-padding_length]
         return s
 
@@ -230,9 +229,9 @@ class HTTP2(Packet):
         frames = []
         while pos <= len(raw_bytes) - frame_header_len:
             preface = None
-            if raw_bytes[pos: pos + len(HTTP2Preface.PREFACE)] == HTTP2Preface.PREFACE:
-                preface = HTTP2Preface(raw_bytes[pos: pos + len(HTTP2Preface.PREFACE)])
-                pos += len(HTTP2Preface.PREFACE)
+            if raw_bytes[pos: pos + len(HTTP2Preface.MAGIC)] == HTTP2Preface.MAGIC:
+                preface = HTTP2Preface(raw_bytes[pos: pos + len(HTTP2Preface.MAGIC)])
+                pos += len(HTTP2Preface.MAGIC)
             payload_len = frame(raw_bytes[pos: pos + frame_header_len]).length
             payload = frame(raw_bytes[pos: pos + frame_header_len + payload_len])
             # Populate our list of found frames

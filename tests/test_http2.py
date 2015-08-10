@@ -8,7 +8,7 @@ from scapy_http2.http2 import *
 
 class TestHTTP2Preface(unittest.TestCase):
     def test_http2_preface_is_constant(self):
-        self.assertEqual(HTTP2Preface.PREFACE, str(HTTP2Preface()))
+        self.assertEqual(HTTP2Preface.MAGIC, str(HTTP2Preface()))
 
     def test_when_http2_preface_is_present_it_is_dissected(self):
         built_pkt = HTTP2Preface()/HTTP2Frame()/HTTP2Settings()
