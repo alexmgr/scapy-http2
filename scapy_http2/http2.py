@@ -249,6 +249,41 @@ class HTTP2(Packet):
         return raw_bytes[pos:]
 
 
+class HTTP2Socket(object):
+    def __init__(self, socket_):
+        if socket_ is None:
+            raise ValueError("Socket object required")
+        self.socket_ = socket_
+        self.history = []
+
+    def __getattr__(self, attr):
+        try:
+            super(HTTP2Socket, self).__getattr__()
+        except AttributeError:
+            return getattr(self.socket_, attr)
+
+    def sendall(self, pkt):
+        self.socket_.sendall(str(pkt))
+        self.history.append(pkt)
+
+    def recvall(self, size=8192):
+        import ssl
+        resp = []
+        while True:
+            try:
+                data = self.socket_.recv(size)
+                if not data:
+                    break
+                resp.append(data)
+            except socket.timeout:
+                break
+            except ssl.SSLError:
+                break
+        frames = HTTP2("".join(resp))
+        self.history.append(frames)
+        return frames
+
+
 def pack_headers(encoder, headers):
     return encoder.encode(headers)
 
