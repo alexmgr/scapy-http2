@@ -129,7 +129,6 @@ class TestHTTP2(unittest.TestCase):
         frame9 = HTTP2Frame(flags=HTTP2Flags.PADDED) / HTTP2Continuation(headers="some-headers")
         built_pkt = HTTP2.from_frames([frame1, frame2, frame3, frame4, frame5, frame6, frame7, frame8, frame9])
         pkt = HTTP2(str(built_pkt))
-        pkt.show()
         self.assertTrue(len(pkt.frames) == 9)
         self.assertEqual(str(frame1), str(pkt.frames[0]))
         self.assertEqual(str(frame2), str(pkt.frames[1]))

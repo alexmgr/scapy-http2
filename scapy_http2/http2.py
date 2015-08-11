@@ -3,12 +3,18 @@
 import collections
 import random
 import socket
+import ssl
 import struct
+import sys
+import warnings
 
-from scapy.fields import BitField, ByteEnumField, ByteField, ConditionalField, FieldLenField, FlagsField, IntEnumField,\
-    IntField, LenField, PacketListField, ShortEnumField, StrField, StrFixedLenField, StrLenField
+from scapy.fields import BitField, ByteEnumField, ByteField, ConditionalField, FlagsField, IntEnumField, IntField, \
+    LenField, PacketListField, ShortEnumField, StrField, StrFixedLenField
 from scapy.layers.inet import TCP
 from scapy.packet import bind_layers, Packet, Padding
+
+
+H2_ALPN_IDS = ["h2"]
 
 
 class ByteLenField(LenField):
@@ -134,7 +140,7 @@ underlayer_has_priority_flag_set = lambda pkt: underlayer_has_flag_set(pkt, HTTP
 class HTTP2Data(HTTP2PaddedFrame):
     name = "HTTP2 %s Frame" % HTTP2_FRAME_TYPES[HTTP2FrameTypes.DATA]
     fields_desc = [ConditionalField(LenField("padding_length", None, fmt="B"), underlayer_has_padding_flag_set),
-                   StrField("data", ":method = GET\r\n:scheme = https\r\n:path = /\r\n") ]
+                   StrField("data", ":method = GET\r\n:scheme = https\r\n:path = /\r\n")]
 
 
 class HTTP2Headers(HTTP2PaddedFrame):
@@ -237,14 +243,14 @@ class HTTP2(Packet):
             if raw_bytes[pos: pos + len(HTTP2Preface.MAGIC)] == HTTP2Preface.MAGIC:
                 preface = HTTP2Preface(raw_bytes[pos: pos + len(HTTP2Preface.MAGIC)])
                 pos += len(HTTP2Preface.MAGIC)
-            payload_len = frame(raw_bytes[pos: pos + frame_header_len]).length
+            payload_len = frame(raw_bytes[pos: pos + frame_header_len]).length or 0
             payload = frame(raw_bytes[pos: pos + frame_header_len + payload_len])
             # Populate our list of found frames
             if preface is not None:
                 frames.append(preface / payload)
             else:
                 frames.append(payload)
-            pos += (frame_header_len + payload.length)
+            pos += (frame_header_len + (payload.length or 0))
         self.fields["frames"] = frames
         return raw_bytes[pos:]
 
@@ -261,6 +267,12 @@ class HTTP2Socket(object):
             super(HTTP2Socket, self).__getattr__()
         except AttributeError:
             return getattr(self.socket_, attr)
+
+    def send_preface(self, settings=[]):
+        req = HTTP2.from_frames([HTTP2Preface(),
+                                 HTTP2Frame() / HTTP2Settings(settings=settings)])
+        self.sendall(req)
+        return self.recvall()
 
     def sendall(self, pkt):
         self.socket_.sendall(str(pkt))
@@ -283,6 +295,40 @@ class HTTP2Socket(object):
         self.history.append(frames)
         return frames
 
+def tls_connect(tls_socket, host, force_npn=False):
+    missing_alpn = True
+    connection_succeeded = False
+    try:
+        tls_socket.context.set_alpn_protocols(H2_ALPN_IDS)
+        missing_alpn = False
+        connection_succeeded = True
+    except AttributeError:
+        warnings.warn("Python missing ALPN support. Found %s.%s.%s, require 2.7.10" %
+                      (sys.version_info.major, sys.version_info.minor, sys.version_info.micro))
+    except NotImplementedError:
+        warnings.warn("Openssl missing ALPN support. Found %s, require 1.0.2" %
+                      ".".join(map(str, ssl.OPENSSL_VERSION_INFO[:3])))
+
+    if missing_alpn or force_npn:
+        warnings.warn("Attempting to use NPN. Most implementations should not work, but nghttp2 does")
+        try:
+            tls_socket.context.set_npn_protocols(H2_ALPN_IDS)
+            connection_succeeded = True
+        except (AttributeError, NotImplementedError):
+            raise RuntimeError("Python or Openssl missing NPN support")
+
+    if connection_succeeded:
+        try:
+            tls_socket.connect(host)
+        except (socket.error, ssl.socket_error):
+            connection_succeeded = False
+    return connection_succeeded
+
+def wrap_tls_socket(tls_socket):
+    if tls_socket.selected_npn_protocol() in H2_ALPN_IDS or tls_socket.selected_alpn_protocol() in H2_ALPN_IDS:
+        return HTTP2Socket(tls_socket)
+    else:
+        raise RuntimeError("ALPN negotiation failed")
 
 def pack_headers(encoder, headers):
     return encoder.encode(headers)
