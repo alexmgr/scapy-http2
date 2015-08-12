@@ -1,5 +1,8 @@
-hpack
 scapy
 pcapy
 dnet
+# Test
+mock
+requests >= 1.2.3
+hpack
 

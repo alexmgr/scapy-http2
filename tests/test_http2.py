@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import unittest
+import mock.mock as mock
+import requests
 
 from scapy.packet import Raw
 from scapy_http2.http2 import *
@@ -142,6 +144,50 @@ class TestHTTP2(unittest.TestCase):
         self.assertTrue(pkt.frames[7].haslayer(Raw))
         self.assertEqual(str(frame9), str(pkt.frames[8]))
 
+
+class TestHTTP2Socket(unittest.TestCase):
+    def setUp(self):
+        self.frame_sut = HTTP2Frame()
+        self.socket_mock = mock.Mock()
+        self.socket_mock.sendall = mock.MagicMock(name="socket_sendall")
+        self.socket_mock.recv = mock.MagicMock(name="socket_recv", side_effect=[str(self.frame_sut),
+                                                                                socket.timeout("Mocked timeout")])
+        self.http2_socket = HTTP2Socket(self.socket_mock)
+        super(TestHTTP2Socket, self).setUp()
+
+    def _mock_http2_network_calls(self):
+        self.http2_socket.sendall = mock.MagicMock(name="http2_socket_sendall")
+        self.http2_socket.recvall = mock.MagicMock(name="http2_socket_recvall", side_effect=self.frame_sut)
+
+    def test_when_sendall_is_called_data_is_sent_on_socket(self):
+        frame_sut = HTTP2Frame()
+        self.http2_socket.sendall(frame_sut)
+        self.socket_mock.sendall.assert_called_once_with(str(frame_sut))
+
+    def test_when_data_is_received_on_socket_recvall_retrieves_it(self):
+        pkt = self.http2_socket.recvall()
+        self.assertEqual(2, self.socket_mock.recv.call_count)
+        self.assertEqual(str(self.frame_sut), str(pkt))
+
+    def test_when_upgrade_headers_are_missing_they_are_added(self):
+        self._mock_http2_network_calls()
+        req = requests.Request("GET", "http://1.2.3.4:1234/a/b/c/d?1=2&3=4")
+        prep_req = req.prepare()
+        response = self.http2_socket.send_upgrade(prep_req)
+        arg = self.http2_socket.sendall.call_args[0][0]
+        self.assertTrue("Upgrade" in arg)
+        self.assertTrue("Connection" in arg)
+        self.assertTrue("HTTP2-Settings" in arg)
+
+    def test_when_upgrade_header_is_present_it_is_preserved(self):
+        self._mock_http2_network_calls()
+        req = requests.Request("POST", "http://1.2.3.4:1234/a/b/c/d", headers={"conNecTion": "abcdefg"},
+                               data={"a": "b", "1": "2"})
+        prep_req = req.prepare()
+        response = self.http2_socket.send_upgrade(prep_req)
+        arg = self.http2_socket.sendall.call_args[0][0]
+        self.assertTrue("conNecTion: abcdefg" in arg)
+        self.assertFalse("Upgrade, HTTP2-Settings" in arg)
 
 class TestTopLevelFunctions(unittest.TestCase):
     def test_when_flags_are_set_they_are_caught(self):

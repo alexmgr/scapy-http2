@@ -1,11 +1,14 @@
 #! -*- coding: utf-8 -*-
 
+import base64
 import collections
 import random
 import socket
 import ssl
 import struct
 import sys
+import urllib
+import urlparse
 import warnings
 
 from scapy.fields import BitField, ByteEnumField, ByteField, ConditionalField, FlagsField, IntEnumField, IntField, \
@@ -102,6 +105,15 @@ HTTP2SettingIds = Dict2Enum(HTTP2_SETTING_IDS)
 def has_flag_set(pkt, flag):
     flag_index = HTTP2_FLAGS.keys().index(flag)
     return True if pkt.haslayer(HTTP2Frame) and (pkt[HTTP2Frame].flags & flag) >> flag_index == 1 else False
+
+
+class HTTP1Packet(Packet):
+    name = "HTTP1 Packet"
+    MAGIC = "HTTP/1.1"
+    DELIMITER = "\r\n"
+    MAGIC_END = DELIMITER * 2
+    UPGRADE_MAGIC = "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n"
+    fields_desc = [StrField("data", UPGRADE_MAGIC)]
 
 
 class HTTP2Preface(Packet):
@@ -238,8 +250,18 @@ class HTTP2(Packet):
         frame_header_len = len(frame())
 
         frames = []
+        if raw_bytes.startswith(HTTP1Packet.MAGIC):
+            try:
+                http1_packet_end = raw_bytes.index(HTTP1Packet.MAGIC_END) + len(HTTP1Packet.MAGIC_END)
+                frames.append(HTTP1Packet(raw_bytes[:http1_packet_end]))
+                raw_bytes = raw_bytes[http1_packet_end:]
+            # Can't find the end of the HTTP1 packet. Parse as HTTP2
+            except ValueError:
+                pass
+
         while pos <= len(raw_bytes) - frame_header_len:
             preface = None
+            # If we have a HTTP2 Magic, parse it and remove it from bytes
             if raw_bytes[pos: pos + len(HTTP2Preface.MAGIC)] == HTTP2Preface.MAGIC:
                 preface = HTTP2Preface(raw_bytes[pos: pos + len(HTTP2Preface.MAGIC)])
                 pos += len(HTTP2Preface.MAGIC)
@@ -268,10 +290,32 @@ class HTTP2Socket(object):
         except AttributeError:
             return getattr(self.socket_, attr)
 
+    def _build_http1_request(self, prepared_request):
+        parsed_url = urlparse.urlparse(prepared_request.url)
+        if "Host".lower() not in map(lambda x: x.lower(), prepared_request.headers.keys()):
+            prepared_request.headers["Host"] = parsed_url.netloc
+        request = "%s\r\n%s\r\n\r\n%s" % ("%s %s HTTP/1.1" % (prepared_request.method, prepared_request.path_url),
+                                          "\r\n".join("%s: %s" % (k, v) for k, v in prepared_request.headers.items()),
+                                          prepared_request.body or "")
+        return request
+
     def send_preface(self, settings=[]):
         req = HTTP2.from_frames([HTTP2Preface(),
                                  HTTP2Frame() / HTTP2Settings(settings=settings)])
         self.sendall(req)
+        return self.recvall()
+
+    def send_upgrade(self, prepared_request):
+        default_settings = HTTP2Settings(settings=[HTTP2Setting(id=HTTP2SettingIds.SETTINGS_MAX_CONCURRENT_STREAMS,
+                                                                value=100)])
+        prepared_headers = map(lambda x: x.lower(), prepared_request.headers.keys())
+        if "Connection".lower() not in prepared_headers:
+            prepared_request.headers["Connection"] = "Upgrade, HTTP2-Settings"
+        if "Upgrade".lower() not in prepared_headers:
+            prepared_request.headers["Upgrade"] = "h2c"
+        if "HTTP2-Settings".lower() not in prepared_headers:
+            prepared_request.headers["HTTP2-Settings"] = urllib.quote(base64.b64encode(str(default_settings)))
+        self.sendall(self._build_http1_request(prepared_request))
         return self.recvall()
 
     def sendall(self, pkt):
