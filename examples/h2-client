@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
     if resp.haslayer(HTTP2Settings):
         req = HTTP2.from_frames([HTTP2Frame(flags=HTTP2Flags.ACK) / HTTP2Settings(),
-                                 HTTP2Frame(flags=HTTP2Flags.ACK, stream=0x5) /
+                                 HTTP2Frame(flags=HTTP2Flags.END_STREAM, stream=0x5) /
                                  HTTP2Headers(headers=pack_headers(
                                      encoder, {":method": "GET", ":scheme": scheme, ":path": args.resource})),
                                  HTTP2Frame(flags=HTTP2Flags.END_HEADERS, stream=0x5) /

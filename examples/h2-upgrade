@@ -1,0 +1,43 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import argparse
+import socket
+import urlparse
+import requests
+
+import hpack.hpack as hpack
+from scapy_http2.http2 import *
+
+
+def prepare_parser():
+    parser = argparse.ArgumentParser(description="A simple HTTP2 GET client")
+    parser.add_argument("host", help="Host to connect to")
+    parser.add_argument("-p", "--port", help="Port to connect to. Default is 443", type=int, default=80)
+    parser.add_argument("-t", "--timeout", help="Socket timeout. Default is 0.5 seconds", type=float, default=0.5)
+    parser.add_argument("-r", "--resource", help="The path to the page to retrieve. Default is /", default="/")
+    return parser
+
+if __name__ == "__main__":
+    parser = prepare_parser()
+    args = parser.parse_args()
+
+    host = (args.host, args.port)
+    encoder = hpack.Encoder()
+
+    s = socket.socket()
+    s.connect(host)
+    s.settimeout(args.timeout)
+
+    # Ask for h2c upgrade by adding Upgrade headers
+    request = requests.Request("GET", urlparse.urljoin("http://%s:%s/" % (args.host, args.port), args.resource))
+    prepared_request = request.prepare()
+    http2_socket = HTTP2Socket(s)
+    resp = http2_socket.send_upgrade(prepared_request)
+    resp.show()
+
+    # Move on to standard HTTP2
+    resp = http2_socket.send_preface()
+    resp.show()
+
+    s.close()

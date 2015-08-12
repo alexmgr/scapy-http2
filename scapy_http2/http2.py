@@ -74,6 +74,7 @@ HTTP2_FLAGS = collections.OrderedDict(((0x01, "ACK"),
                                        (0x80, "UNUSED_8")))
 
 HTTP2Flags = Dict2Enum(HTTP2_FLAGS)
+HTTP2Flags.END_STREAM = 0x1
 
 HTTP2_ERROR_CODES = {0x00: "NO_ERROR",
                      0x01: "PROTOCOL_ERROR",
