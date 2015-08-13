@@ -121,7 +121,7 @@ setup(
         "An HTTP2 layer for scapy the interactive packet manipulation tool"),
     license="GPLv2",
     keywords=["scapy", "http2", "layer", "network", "dissect", "packets"],
-    url="http://10.212.224.20/alexmon/scapy_http2/",
+    url="http://10.212.224.20/alexmon/scapy-http2/",
     # generate rst from .md:  pandoc --from=markdown --to=rst README.md -o README.rst (fix diff section and footer)
     long_description=read("README.rst") if os.path.isfile("README.rst") else read("README.md"),
     install_requires=os_install_requires(),
