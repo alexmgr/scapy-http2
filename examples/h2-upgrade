@@ -7,7 +7,13 @@ import urlparse
 import requests
 
 import hpack.hpack as hpack
-from scapy_http2.http2 import *
+try:
+    from scapy.layers.http2 import *
+except ImportError:
+    import os
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from scapy_http2.http2 import *
 
 
 def prepare_parser():
@@ -15,6 +21,7 @@ def prepare_parser():
     parser.add_argument("host", help="Host to connect to")
     parser.add_argument("-p", "--port", help="Port to connect to. Default is 443", type=int, default=80)
     parser.add_argument("-t", "--timeout", help="Socket timeout. Default is 0.5 seconds", type=float, default=0.5)
+    parser.add_argument("-s", "--ssl", help="Use TLS to secure the transport layer", action="store_true")
     parser.add_argument("-r", "--resource", help="The path to the page to retrieve. Default is /", default="/")
     return parser
 
@@ -25,19 +32,32 @@ if __name__ == "__main__":
     host = (args.host, args.port)
     encoder = hpack.Encoder()
 
-    s = socket.socket()
-    s.connect(host)
-    s.settimeout(args.timeout)
+    tcp_socket = socket.socket()
+    if args.ssl:
+        socket_ = ssl.SSLSocket(tcp_socket)
+    else:
+        socket_ = tcp_socket
 
-    # Ask for h2c upgrade by adding Upgrade headers
-    request = requests.Request("GET", urlparse.urljoin("http://%s:%s/" % (args.host, args.port), args.resource))
-    prepared_request = request.prepare()
-    http2_socket = HTTP2Socket(s)
-    resp = http2_socket.send_upgrade(prepared_request)
-    resp.show()
+    try:
+        socket_.connect(host)
+        socket_.settimeout(args.timeout)
+        http2_socket = HTTP2Socket(socket_)
+    except ssl.SSLError:
+        parser.exit(2, "Failed TLS connection")
+    except socket.error:
+        parser.exit(2, "Failed TCP connection")
+    else:
 
-    # Move on to standard HTTP2
-    resp = http2_socket.send_preface()
-    resp.show()
+        # Ask for h2c upgrade by adding Upgrade headers
+        request = requests.Request("GET", urlparse.urljoin("http://%s:%s/" % (args.host, args.port), args.resource))
+        prepared_request = request.prepare()
+        resp = http2_socket.send_upgrade(prepared_request)
+        resp.show()
 
-    s.close()
+        # Move on to standard HTTP2
+        resp = http2_socket.send_preface()
+        resp.show()
+
+        if args.ssl:
+            socket_.close()
+        tcp_socket.close()
