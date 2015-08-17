@@ -2,11 +2,11 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import socket
-import urlparse
-import requests
 
+import requests
 import hpack.hpack as hpack
+
+
 try:
     from scapy.layers.http2 import *
 except ImportError:

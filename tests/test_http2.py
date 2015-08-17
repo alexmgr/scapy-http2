@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 
 import unittest
+
 import mock.mock as mock
 import requests
-
 from scapy.packet import Raw
+
 from scapy_http2.http2 import *
 
 
@@ -101,7 +102,7 @@ class TestHTTP2Headers(unittest.TestCase):
 
 
 class TestHTTP2Settings(unittest.TestCase):
-    def test_frame_containing_multiple_settings_is_correclty_dissected(self):
+    def test_frame_containing_multiple_settings_is_correctly_dissected(self):
         setting1 = HTTP2Setting(id=HTTP2SettingIds.SETTINGS_MAX_HEADER_LIST_SIZE, value=128)
         setting2 = HTTP2Setting(id=HTTP2SettingIds.SETTINGS_MAX_CONCURRENT_STREAMS, value=100)
         frame1 = HTTP2Frame() / HTTP2Settings(settings=[setting1, setting2]) / ("A" * 5)
@@ -173,7 +174,7 @@ class TestHTTP2Socket(unittest.TestCase):
         self._mock_http2_network_calls()
         req = requests.Request("GET", "http://1.2.3.4:1234/a/b/c/d?1=2&3=4")
         prep_req = req.prepare()
-        response = self.http2_socket.send_upgrade(prep_req)
+        self.http2_socket.send_upgrade(prep_req)
         arg = self.http2_socket.sendall.call_args[0][0]
         self.assertTrue("Upgrade" in arg)
         self.assertTrue("Connection" in arg)
@@ -184,10 +185,11 @@ class TestHTTP2Socket(unittest.TestCase):
         req = requests.Request("POST", "http://1.2.3.4:1234/a/b/c/d", headers={"conNecTion": "abcdefg"},
                                data={"a": "b", "1": "2"})
         prep_req = req.prepare()
-        response = self.http2_socket.send_upgrade(prep_req)
+        self.http2_socket.send_upgrade(prep_req)
         arg = self.http2_socket.sendall.call_args[0][0]
         self.assertTrue("conNecTion: abcdefg" in arg)
         self.assertFalse("Upgrade, HTTP2-Settings" in arg)
+
 
 class TestTopLevelFunctions(unittest.TestCase):
     def test_when_flags_are_set_they_are_caught(self):

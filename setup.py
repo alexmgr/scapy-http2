@@ -7,6 +7,7 @@ import fileinput
 import os
 import platform
 import sys
+
 from setuptools import setup
 from setuptools.command.install import install as _install
 
@@ -20,7 +21,7 @@ def get_site_packages():
     # Relies on the fact that os.py is in the dir above site_packages
     os_location = os.path.dirname(os.__file__)
     site_packages = []
-    # Consider Debain/Ubuntu custom
+    # Consider Debian/Ubuntu custom
     for site in ["site-packages", "dist-packages"]:
         site_path = os.path.join(os_location, site)
         if os.path.isdir(site_path):
@@ -33,7 +34,7 @@ def get_scapy_locations(sites):
     for site in sites:
         try:
             dirs = os.listdir(site)
-        except OSError as oe:
+        except OSError:
             print("Non existing site-package reported: %s. Skipping" %
                   site, file=sys.stderr)
         else:
@@ -44,9 +45,9 @@ def get_scapy_locations(sites):
                     if os.path.isdir(scapy_path):
                         # Look for layers folder under the scapy install folder
                         # (can be nested)
-                        for root, dirs, files in os.walk(scapy_path):
-                            for dir_ in dirs:
-                                if dir_ == "layers":
+                        for root, sub_dirs, files in os.walk(scapy_path):
+                            for sub_dir_ in sub_dirs:
+                                if sub_dir_ == "layers":
                                     scapy_locations.append(root)
     return scapy_locations
 
@@ -67,7 +68,7 @@ def get_layer_files_dst(sites, path="scapy_http2"):
     return data_files
 
 
-class install(_install):
+class Install(_install):
 
     def run(self):
         _install.run(self)
@@ -101,12 +102,14 @@ def _post_install(dir_):
                 else:
                     print(line, end="")
 
+
 def os_install_requires():
     dependencies = ["scapy", "hpack", "requests"]
     # Scapy on OSX requires dnet and pcapy, but fails to declare them as dependencies
     if platform.system() == "Darwin":
         dependencies.extend(("dnet", "pcapy"))
     return dependencies
+
 
 def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
@@ -130,5 +133,5 @@ setup(
     # Change once virtualenv bug is fixed
     # data_files = get_layer_files_dst(sites=site.getsitepackages())
     data_files=get_layer_files_dst(get_site_packages()),
-    cmdclass={"install": install}
+    cmdclass={"install": Install}
 )
